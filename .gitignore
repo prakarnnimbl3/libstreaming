@@ -9,7 +9,6 @@ gen/
 *.o
 *.so
 *.sh
-local.properties
 custom_rules.xml
 ant.properties
 *~
