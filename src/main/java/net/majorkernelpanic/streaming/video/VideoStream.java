@@ -20,21 +20,6 @@
 
 package net.majorkernelpanic.streaming.video;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.nio.ByteBuffer;
-import java.util.concurrent.Semaphore;
-import java.util.concurrent.TimeUnit;
-
-import net.majorkernelpanic.streaming.MediaStream;
-import net.majorkernelpanic.streaming.Stream;
-import net.majorkernelpanic.streaming.exceptions.CameraInUseException;
-import net.majorkernelpanic.streaming.exceptions.ConfNotSupportedException;
-import net.majorkernelpanic.streaming.exceptions.InvalidSurfaceException;
-import net.majorkernelpanic.streaming.gl.SurfaceView;
-import net.majorkernelpanic.streaming.hw.EncoderDebugger;
-import net.majorkernelpanic.streaming.hw.NV21Convertor;
-import net.majorkernelpanic.streaming.rtp.MediaCodecInputStream;
 import android.annotation.SuppressLint;
 import android.content.SharedPreferences;
 import android.content.SharedPreferences.Editor;
@@ -46,10 +31,27 @@ import android.media.MediaCodecInfo;
 import android.media.MediaFormat;
 import android.media.MediaRecorder;
 import android.os.Looper;
+import android.os.ParcelFileDescriptor;
 import android.util.Log;
 import android.view.Surface;
 import android.view.SurfaceHolder;
 import android.view.SurfaceHolder.Callback;
+
+import net.majorkernelpanic.streaming.MediaStream;
+import net.majorkernelpanic.streaming.Stream;
+import net.majorkernelpanic.streaming.exceptions.CameraInUseException;
+import net.majorkernelpanic.streaming.exceptions.ConfNotSupportedException;
+import net.majorkernelpanic.streaming.exceptions.InvalidSurfaceException;
+import net.majorkernelpanic.streaming.gl.SurfaceView;
+import net.majorkernelpanic.streaming.hw.EncoderDebugger;
+import net.majorkernelpanic.streaming.hw.NV21Convertor;
+import net.majorkernelpanic.streaming.rtp.MediaCodecInputStream;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.ByteBuffer;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 
 /** 
  * Don't use this class directly.
@@ -80,9 +82,11 @@ public abstract class VideoStream extends MediaStream {
 	protected String mEncoderName;
 	protected int mEncoderColorFormat;
 	protected int mCameraImageFormat;
-	protected int mMaxFps = 0;	
+	protected int mMaxFps = 0;
+    private ParcelFileDescriptor parcelRead;
+    private ParcelFileDescriptor parcelWrite;
 
-	/** 
+    /**
 	 * Don't use this class directly.
 	 * Uses CAMERA_FACING_BACK by default.
 	 */
@@ -355,7 +359,11 @@ public abstract class VideoStream extends MediaStream {
 			// We write the ouput of the camera in a local socket instead of a file !			
 			// This one little trick makes streaming feasible quiet simply: data from the camera
 			// can then be manipulated at the other end of the socket
-			mMediaRecorder.setOutputFile(mSender.getFileDescriptor());
+            ParcelFileDescriptor[] parcelFileDescriptors =ParcelFileDescriptor.createPipe();
+            parcelRead = new ParcelFileDescriptor(parcelFileDescriptors[0]);
+            parcelWrite  = new ParcelFileDescriptor(parcelFileDescriptors[1]);
+
+			mMediaRecorder.setOutputFile(parcelWrite.getFileDescriptor());
 
 			mMediaRecorder.prepare();
 			mMediaRecorder.start();
@@ -383,6 +391,16 @@ public abstract class VideoStream extends MediaStream {
 		// The packetizer encapsulates the bit stream in an RTP stream and send it over the network
 		mPacketizer.setInputStream(mReceiver.getInputStream());
 		mPacketizer.start();
+
+        InputStream inputStream = null;
+        try{
+            inputStream = new ParcelFileDescriptor.AutoCloseInputStream(parcelRead);
+        }
+        catch (Exception e){
+            Log.e(TAG, "Couldn't init AutoCloseInputStream");
+        }
+
+        mPacketizer.setInputStream(inputStream);
 
 		mStreaming = true;
 
@@ -585,7 +603,8 @@ public abstract class VideoStream extends MediaStream {
 				if (parameters.getFlashMode()!=null) {
 					parameters.setFlashMode(mFlashEnabled?Parameters.FLASH_MODE_TORCH:Parameters.FLASH_MODE_OFF);
 				}
-				parameters.setRecordingHint(true);
+//                parameters.set("cam_mode", 1);
+                parameters.setRecordingHint(true);
 				mCamera.setParameters(parameters);
 				mCamera.setDisplayOrientation(mOrientation);
 
